@@ -1,20 +1,39 @@
-FROM node:lts-alpine
-ADD ui /app
-ADD modules/speedtest/speedtest_worker.js /app/public/speedtest_worker.js
+FROM node:lts-alpine as builderNodeJSCache
+ADD ui/package.json /app/package.json
 WORKDIR /app
-RUN npm i && \
-    npm run build
+RUN npm i
 
-FROM alpine:3.16
-LABEL maintainer="samlm0 <update@ifdream.net>"
+FROM node:lts-alpine as builderNodeJS
+ADD ui /app
+WORKDIR /app
+COPY --from=builderNodeJSCache /app/node_modules /app/node_modules
+RUN npm run build \
+    && chmod -R 650 /app/dist
 
-RUN apk add --no-cache php81 php81-pecl-maxminddb php81-ctype php81-pecl-swoole nginx xz \
+
+FROM alpine:3 as builderGolang
+ADD backend /app
+WORKDIR /app
+COPY --from=builderNodeJS /app/dist /app/embed/ui
+RUN apk add --no-cache go 
+
+RUN go build -o als && \
+    chmod +x als
+
+FROM alpine:3 as builderEnv
+WORKDIR /app
+ADD scripts /app
+RUN sh /app/install-software.sh
+RUN apk add --no-cache \
     iperf iperf3 \
     mtr \
     traceroute \
     iputils
+RUN rm -rf /app
 
-ADD backend/app /app
-COPY --from=0 /app/dist /app/webspaces
+FROM alpine:3
+LABEL maintainer="samlm0 <update@ifdream.net>"
+COPY --from=builderEnv / /
+COPY --from=builderGolang --chmod=777 /app/als/als /bin/als
 
-CMD php81 /app/app.php
+CMD /bin/als

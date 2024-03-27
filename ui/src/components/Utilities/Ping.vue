@@ -1,92 +1,87 @@
-<template>
-    <n-space vertical>
-        <n-input-group>
-            <n-input :disabled="working" v-model:value="host" placeholder="IP Address Or Domain" @keyup.enter="ping" />
-            <n-button :loading="working" type="primary" ghost @click="ping()">
-                Ping
-            </n-button>
-        </n-input-group>
-        <n-table v-show="records.length > 0" :bordered="false" :single-line="false">
-            <thead>
-                <tr>
-                    <th>#</th>
-                    <th>Host</th>
-                    <th>TTL</th>
-                    <th>Latency</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr v-for="record in records">
-                    <td>{{ record.seq }}</td>
-                    <td>{{ record.host }}</td>
-                    <td>{{ record.ttl }}</td>
-                    <td>{{ record.latency }} ms</td>
-                </tr>
-            </tbody>
-        </n-table>
-    </n-space>
-</template>
+<script setup>
+import { onMounted, onUnmounted } from 'vue'
+import { useAppStore } from '@/stores/app'
 
-<script>
-import { defineComponent, defineAsyncComponent } from 'vue'
-export default defineComponent({
-    props: {
-        wsMessage: Array,
-        ws: WebSocket
-    },
-    data() {
-        return {
-            host: '',
-            working: false,
-            records: []
-        }
-    },
-    methods: {
-        ping() {
-            if (this.working) return false;
-            this.records = []
-            this.working = true
-            this.ws.send('1|' + this.host)
-            let ticket = ''
-            let pingProcess = this.$watch(() => this.wsMessage, (e) => {
-                this.wsMessage.forEach((e, i) => {
-                    if (e[0] != 1) return true
+const appStore = useAppStore()
+const working = ref(false)
+const records = ref([])
+const host = ref('')
+let abortController = markRaw(new AbortController())
 
-                    if (ticket.length == 0 && e[2] == this.host && e.length == 4) {
-                        ticket = e[3]
-                        this.wsMessage.splice(i, 1)
-                        return true;
-                    }
+const handlePingMessage = (e) => {
+  const data = JSON.parse(e.data)
+  let record = {
+    host: '-',
+    seq: data.seq,
+    ttl: '-',
+    latency: '-'
+  }
 
-                    if (ticket == e[1] && e[2] == '0') {
-                        this.working = false
-                        pingProcess()
-                        this.wsMessage.splice(i, 1)
-                        return false;
-                    }
+  if (!data.is_timeout) {
+    record.host = data.from
+    record.ttl = data.ttl
+    record.latency = data.latency / 1000000
+  }
 
-                    if (ticket == e[1] && e[2] == '1') {
-                        if (e.length == 7) {
-                            this.records.push({
-                                host: e[3],
-                                seq: e[4],
-                                ttl: e[5],
-                                latency: e[6]
-                            })
-                        } else {
-                            this.records.push({
-                                host: '-',
-                                seq: this.records.length + 1,
-                                ttl: '-',
-                                latency: '-'
-                            })
-                        }
-                        this.wsMessage.splice(i, 1)
-                        return true;
-                    }
-                })
-            }, { immediate: true, deep: true })
-        }
-    }
+  records.value.push(record)
+  return
+}
+
+onUnmounted(() => {
+  stopPing()
 })
+
+const stopPing = () => {
+  appStore.source.removeEventListener('Ping', handlePingMessage)
+  abortController.abort('Unmounted')
+}
+
+const ping = async () => {
+  if (working.value) return false
+  abortController = new AbortController()
+  records.value = []
+  working.value = true
+  appStore.source.addEventListener('Ping', handlePingMessage)
+  try {
+    await appStore.requestMethod('ping', { ip: host.value }, abortController.signal)
+  } catch (e) {}
+  stopPing()
+  working.value = false
+}
 </script>
+
+<template>
+  <n-space vertical>
+    <n-input-group>
+      <n-input
+        :disabled="working"
+        v-model:value="host"
+        placeholder="IP Address Or Domain"
+        @keyup.enter="ping"
+      />
+      <n-button :type="working ? 'error' : 'primary'" ghost @click="working ? stopPing() : ping()">
+        <template v-if="working"> Stop </template>
+        <template v-else> Ping </template>
+        <n-spin v-if="working" :size="16" style="margin-left: 5px"></n-spin>
+      </n-button>
+    </n-input-group>
+    <n-table v-show="records.length > 0" :bordered="false" :single-line="false">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Host</th>
+          <th>TTL</th>
+          <th>Latency</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="record in records">
+          <td>{{ record.seq }}</td>
+          <td>{{ record.host }}</td>
+          <td>{{ record.ttl }}</td>
+          <td>{{ record.latency.toFixed(2) }} ms</td>
+        </tr>
+      </tbody>
+    </n-table>
+  </n-space>
+</template>

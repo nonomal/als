@@ -1,59 +1,46 @@
-<template>
-    <div>
-        <n-card title="Server Information" hoverable>
-            <n-space vertical>
-                <div v-show="location">
-                    服务器地点: {{ location }}
-                </div>
-                <div v-show="publicIpv4">
-                    公网 IPv4 地址: <n-tag>{{ publicIpv4 }}</n-tag>
-                </div>
-                <div v-show="publicIpv6">
-                    公网 IPv6 地址: <n-tag> [{{ publicIpv6 }}]</n-tag>
-                </div>
-                <div v-show="clientIp">
-                    您当前的 IP 地址: <n-tag>{{ clientIp }}</n-tag>
-                </div>                
-            </n-space>
-            <!-- <n-progress type=" line" :percentage="100" :show-indicator="false" processing /> -->
-        </n-card>
-    </div>
+<script setup>
+import { useAppStore } from '@/stores/app'
+import Copyable from './Copy.vue'
+import Markdown from 'vue3-markdown-it'
+import { useI18n } from 'vue-i18n'
 
-</template>
-
-<script>
-import { defineComponent } from 'vue'
-export default defineComponent({
-    props: {
-        wsMessage: Array,
-        componentConfig: Object
-    },
-    data() {
-        return {
-            location: false,
-            clientIp: false,
-            publicIpv4: false,
-            publicIpv6: false,
-        }
-    },
-    mounted() {
-        let DataWatcher = this.$watch(() => this.wsMessage, () => {
-            this.wsMessage.forEach((e, i) => {
-                if (e[0] != 1000) return;
-                let data = JSON.parse(e[1])
-                this.wsMessage.splice(i, 1)
-                this.location = data.location
-                this.clientIp = data.client_ip
-                this.publicIpv4 = data.public_ipv4
-                this.publicIpv6 = data.public_ipv6
-                this.componentConfig.public_ipv4 = data.public_ipv4
-                this.componentConfig.public_ipv6 = data.public_ipv6
-                this.componentConfig.testFiles = data.testfiles
-                this.componentConfig.display_traffic = data.display_traffic
-                this.componentConfig.display_speedtest = data.display_speedtest
-                DataWatcher()
-            })
-        }, { immediate: true, deep: true });
-    }
+const appStore = useAppStore()
+const { t } = useI18n({ useScope: 'global' })
+const configKeyMap = ref({
+  location: 'server_location',
+  my_ip: 'my_address',
+  public_ipv4: 'ipv4_address',
+  public_ipv6: 'ipv6_address'
 })
 </script>
+
+<template>
+  <n-card hoverable>
+    <template #header> {{ $t('server_info') }} </template>
+    <n-grid x-gap="12" cols="1 s:2" responsive="screen" v-if="appStore.config">
+      <template v-for="(index, key) in configKeyMap">
+        <template v-if="appStore.config[key]">
+          <n-gi span="1" style="margin-bottom: 5px">
+            <n-card>
+              <template #header> {{ $t(index) }} </template>
+              <Copyable text :value="appStore.config[key]">{{ appStore.config[key] }}</Copyable>
+            </n-card>
+          </n-gi>
+        </template>
+      </template>
+    </n-grid>
+  </n-card>
+  <n-card v-if="appStore.config.sponsor_message.length > 0" hoverable style="margin-top: 10px">
+    <template #header> {{ $t('sponsor_message') }} </template>
+    <div class="sponsor">
+      <Markdown :source="appStore.config.sponsor_message" />
+    </div>
+  </n-card>
+</template>
+
+<style>
+.sponsor a {
+  color: #70c0e8;
+  text-decoration: none;
+}
+</style>
